@@ -51,7 +51,8 @@ def upload():
         from keras.models import load_model
         new_modell = load_model('cat_dog_classifierr.h5')
         # new_model.summary()
-        test_image = image.load_img('images\\' + filename, target_size=(128, 128))
+        image_path = os.path.join('images', filename)
+        test_image = image.load_img(image_path, target_size=(128, 128))
         # test_image = image.load_img("/content/sample_data/train/cat.1041.jpg", target_size=(128, 128))
         test_image = image.img_to_array(test_image)
         test_image = np.expand_dims(test_image, axis=0)
@@ -76,5 +77,5 @@ def send_image(filename):
     return send_from_directory("images", filename)
 
 if __name__ == "__main__":
-    app.run(debug=False)
+    app.run(debug=False, host="0.0.0.0", port=5000)
 
