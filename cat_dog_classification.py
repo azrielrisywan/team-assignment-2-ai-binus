@@ -34,6 +34,7 @@ import numpy as np
 import pandas as pd 
 import keras
 import tensorflow as tf
+import kerastuner as kt
 from keras.preprocessing.image import ImageDataGenerator, load_img
 from keras.utils import to_categorical
 from sklearn.model_selection import train_test_split
@@ -210,39 +211,82 @@ plt.show()
 * **BatchNormalization**: Layer that normalizes its inputs.Batch normalization applies a transformation that maintains the mean output close to 0 and the output standard deviation close to 1.
 """
 
-# initializing the CNN
-model = Sequential()
+""""
+Tambah Hyperparameter tuning --azriel
+"""""
 
-# Convolution layer-1
-model.add(Conv2D(32, (3, 3), activation='relu', input_shape=(IMAGE_WIDTH, IMAGE_HEIGHT, IMAGE_CHANNELS)))
-model.add(BatchNormalization())
-model.add(MaxPooling2D(pool_size=(2, 2)))
-model.add(Dropout(0.25))
 
-# Convolution layer-2
-model.add(Conv2D(64, (3, 3), activation='relu'))
-model.add(BatchNormalization())
-model.add(MaxPooling2D(pool_size=(2, 2)))
-model.add(Dropout(0.25))
+# Fungsi untuk membangun model dengan hyperparameter tuning
+# hyperparameter tuning dilakukan di function ini dengan library kerastuning
+def build_model(hp):
+    model = Sequential()
 
-# Convolution layer-3
-model.add(Conv2D(128, (3, 3), activation='relu'))
-model.add(BatchNormalization())
-model.add(MaxPooling2D(pool_size=(2, 2)))
-model.add(Dropout(0.25))
+    # Convolution layer-1
+    model.add(Conv2D(
+        filters=hp.Int('filters_1', 16, 64, step=16),  # Jumlah filter: 16, 32, 48, 64
+        kernel_size=hp.Choice('kernel_size_1', [3, 5]),  # Ukuran kernel: 3x3 atau 5x5
+        activation='relu',
+        input_shape=(IMAGE_WIDTH, IMAGE_HEIGHT, IMAGE_CHANNELS)
+    ))
+    model.add(BatchNormalization())
+    model.add(MaxPooling2D(pool_size=(2, 2)))
+    model.add(Dropout(hp.Float('dropout_1', 0.1, 0.5, step=0.1)))  # Dropout: 0.1 hingga 0.5
 
-# flattening layer
-model.add(Flatten())
-model.add(Dense(512, activation='relu'))
-model.add(BatchNormalization())
-model.add(Dropout(0.5))
+    # Convolution layer-2
+    model.add(Conv2D(
+        filters=hp.Int('filters_2', 32, 128, step=32),  # Jumlah filter: 32, 64, 96, 128
+        kernel_size=hp.Choice('kernel_size_2', [3, 5]),
+        activation='relu'
+    ))
+    model.add(BatchNormalization())
+    model.add(MaxPooling2D(pool_size=(2, 2)))
+    model.add(Dropout(hp.Float('dropout_2', 0.1, 0.5, step=0.1)))
 
-# Output layer
-model.add(Dense(2, activation='softmax')) # 2 because we have cat and dog classes
+    # Convolution layer-3
+    model.add(Conv2D(
+        filters=hp.Int('filters_3', 64, 256, step=64),  # Jumlah filter: 64, 128, 192, 256
+        kernel_size=hp.Choice('kernel_size_3', [3, 5]),
+        activation='relu'
+    ))
+    model.add(BatchNormalization())
+    model.add(MaxPooling2D(pool_size=(2, 2)))
+    model.add(Dropout(hp.Float('dropout_3', 0.1, 0.5, step=0.1)))
 
-model.compile(loss='categorical_crossentropy', optimizer='rmsprop', metrics=['accuracy'])
-# summary of model
-model.summary()
+    # Flattening layer
+    model.add(Flatten())
+    model.add(Dense(
+        units=hp.Int('units', 128, 512, step=128),  # Jumlah unit: 128, 256, 384, 512
+        activation='relu'
+    ))
+    model.add(BatchNormalization())
+    model.add(Dropout(hp.Float('dropout_4', 0.3, 0.6, step=0.1)))
+
+    # Output layer
+    model.add(Dense(2, activation='softmax'))  # 2 kelas: cat, dog
+
+    # Compile model
+    model.compile(
+        optimizer=tf.keras.optimizers.RMSprop(
+            hp.Float('learning_rate', 1e-4, 1e-2, sampling='log')  # Learning rate: 0.0001 hingga 0.01
+        ),
+        loss='categorical_crossentropy',
+        metrics=['accuracy']
+    )
+    return model
+
+
+# Inisialisasi tuner
+tuner = kt.RandomSearch(
+    build_model,
+    objective='val_accuracy',  # Optimalkan berdasarkan akurasi validasi
+    max_trials=10,  # Coba 10 kombinasi hyperparameter
+    executions_per_trial=1,
+    directory='tuner_dir',
+    project_name='cat_dog_tuning'
+)
+
+# Tampilkan ringkasan pencarian
+tuner.search_space_summary()
 
 """## **5.1. Callback Functions**
 A callback is a set of functions to be applied at given stages of the training procedure. You can use callbacks to get a view on internal states and statistics of the model during training.
@@ -290,11 +334,10 @@ def timer(start_time= None):
 
 """## **5.2. Model Fitting**"""
 
-start_time=timer(None)
-epochs=3 if FAST_RUN else 40   # 37 is good
-classifier = model.fit_generator(
-    train_generator, 
-    epochs=epochs,
+start_time = timer(None)
+tuner.search(
+    train_generator,
+    epochs=3 if FAST_RUN else 20,  # Kurangi epoch untuk testing cepat, idealnya 20-40
     validation_data=validation_generator,
     validation_steps=validate_df_size//batch_size,
     steps_per_epoch=train_df_size//batch_size,
@@ -304,38 +347,53 @@ timer(start_time)
 
 """## **5.3. Save the Model**"""
 
-# As we have used ModelCheckpoint callback function.So no need to save again if your model trained completely.
-#Saving Scikitlearn models
-model.save("cat_dog_classifierr.h5")
+# Ambil model terbaik
+best_model = tuner.get_best_models(num_models=1)[0]
+
+# Tampilkan ringkasan model terbaik
+best_model.summary()
+
+# Simpan model terbaik
+best_model.save("cat_dog_classifier_tuned.h5")
 
 """## **5.4. Load Model**"""
 
 from keras.models import load_model
-new_model = load_model('/content/cat_dog_classifierr.h5')
+new_model = load_model('/content/cat_dog_classifier_tuned.h5')
 
 """## **5.5. Visualize training accuracy and loss**"""
 
+# Latih ulang model terbaik untuk mendapatkan history (opsional)
+history = best_model.fit(
+    train_generator,
+    epochs=3 if FAST_RUN else 20,
+    validation_data=validation_generator,
+    validation_steps=validate_df_size//batch_size,
+    steps_per_epoch=train_df_size//batch_size,
+    callbacks=callbacks
+)
+
+# Visualisasi
 fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 12))
 
-# plot graph of training loss & validation loss
-ax1.plot(classifier.history['loss'], color='b', label="Training loss")
-ax1.plot(classifier.history['val_loss'], color='r', label="validation loss")
-ax1.set_xticks(np.arange(1, 30, 1))
-ax1.set_yticks(np.arange(0, 1, 0.1))
-ax1.set_xlabel("epochs")
-ax1.set_ylabel("loss")
-ax1.set_title("Graph of training loss & validation loss")
+# Plot training & validation loss
+ax1.plot(history.history['loss'], color='b', label="Training loss")
+ax1.plot(history.history['val_loss'], color='r', label="Validation loss")
+ax1.set_xlabel("Epochs")
+ax1.set_ylabel("Loss")
+ax1.set_title("Training and Validation Loss")
+ax1.legend()
 
-# plot graph of training accuracy & validation accuracy
-ax2.plot(classifier.history['accuracy'], color='b', label="Training accuracy")
-ax2.plot(classifier.history['val_accuracy'], color='r',label="Validation accuracy")
-ax2.set_xticks(np.arange(1, 30, 1))
-ax1.set_xlabel("epochs")
-ax1.set_ylabel("accuracy")
-ax1.set_title("Graph of training accuracy & validation accuracy")
+# Plot training & validation accuracy
+ax2.plot(history.history['accuracy'], color='b', label="Training accuracy")
+ax2.plot(history.history['val_accuracy'], color='r', label="Validation accuracy")
+ax2.set_xlabel("Epochs")
+ax2.set_ylabel("Accuracy")
+ax2.set_title("Training and Validation Accuracy")
+ax2.legend()
 
-legend = plt.legend(loc='best', shadow=True)
 plt.tight_layout()
+plt.savefig('accuracy_loss_tuned.png')
 plt.show()
 
 """# **6. Prepare Testing Data**"""
