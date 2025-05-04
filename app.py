@@ -33,7 +33,7 @@ def upload():
     destination = os.path.join(target, filename)
     upload.save(destination)
 
-    model = load_model('cat_dog_classifier.h5')  # correct model name
+    model = load_model('cat_dog_classifier_tuned.h5')  # correct model name
     img = image.load_img(destination, target_size=(128, 128))
     img = image.img_to_array(img)
     img = np.expand_dims(img, axis=0)
